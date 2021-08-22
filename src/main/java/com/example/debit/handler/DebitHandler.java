@@ -87,6 +87,7 @@ public class DebitHandler {
 			}
 			List<Acquisition> associations = deb.getAssociations();
 			associations.add(acq);
+			deb.setAssociations(associations);
 			return debitService.update(deb);
 		})
 				.switchIfEmpty(Mono.error(new RuntimeException("debit association failed")))
@@ -105,24 +106,27 @@ public class DebitHandler {
 		Mono<Acquisition> acquisition = acquisitionService.findByIban(iban);
 		return debit.zipWith(acquisition, (deb, acq) -> {
 					long existAcquisition = deb.getAssociations().stream().filter(d -> Objects.equals(d.getIban(), iban)).count();
+					Boolean isPrincipal = deb.getPrincipal().equals(acq);
 					List<Acquisition> associations = deb.getAssociations();
+					associations.remove(acq);
 					if (existAcquisition == 0){
 						return Mono.error(new RuntimeException("the account you want to disassociate does not exist"));
 					}
-					Double maxBalance= deb.getAssociations().stream()
-							.map(asc -> asc.getBill().getBalance())
-							.max(Comparator.comparing(i -> i))
-							.orElse(0.0);
-					Acquisition acquisitionMaxBalance = deb.getAssociations()
-							.stream()
-							.filter(acquisition1 -> Objects.equals(acquisition1.getBill().getBalance(), maxBalance))
-							.findFirst()
-							.orElse(new Acquisition());
-					if (deb.getAssociations().contains(acq)){
+					if (isPrincipal){
+						Double maxBalance= associations.stream()
+								.map(asc -> asc.getBill().getBalance())
+								.max(Comparator.comparing(i -> i))
+								.orElse(0.0);
+
+						Acquisition acquisitionMaxBalance = associations
+								.stream()
+								.filter(acquisition1 -> Objects.equals(acquisition1.getBill().getBalance(), maxBalance))
+								.findFirst()
+								.orElse(new Acquisition());
 						//deb.setPrincipal(associations.get(associations.size() - 1));
 						deb.setPrincipal(acquisitionMaxBalance);
 					}
-					associations.remove(acq);
+					deb.setAssociations(associations);
 					return debitService.update(deb);
 				})
 				.switchIfEmpty(Mono.error(new RuntimeException("debit association failed")))
