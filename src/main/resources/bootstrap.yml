@@ -1,0 +1,8 @@
+spring:
+  application:
+    name: service-debit
+  cloud:
+    config:
+      uri: https://p3-config-server.azurewebsites.net
+  profiles:
+    active: dev
