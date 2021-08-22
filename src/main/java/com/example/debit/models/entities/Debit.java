@@ -2,6 +2,7 @@ package com.example.debit.models.entities;
 
 import java.time.LocalDateTime;
 import java.util.Date;
+import java.util.List;
 
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.mapping.Document;
@@ -18,8 +19,7 @@ import lombok.Setter;
 
 @JsonInclude(JsonInclude.Include.NON_NULL)
 @Document(collection = "debit")
-@Getter
-@Setter
+@Data
 @AllArgsConstructor
 @NoArgsConstructor
 public class Debit {
@@ -27,18 +27,17 @@ public class Debit {
 	@Id
 	private String id;
 	
-	@Field(name = "amount")
-	private Double amount;
-	
+	@Field(name = "associations")
+	private List<Acquisition> associations;
+
+	@Field(name = "principal")
+	private Acquisition principal;
+
 	@Field(name = "cardNumber")
 	private String cardNumber;
 	
-	@Field(name = "description")
-	private String description = "";
-	
-	@Field(name = "consumDate")
+	@Field(name = "debitDate")
 	@JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd HH:mm:ss")
-	private Date debitDate;
-	
-	
+	private LocalDateTime debitDate = LocalDateTime.now();
+
 }
