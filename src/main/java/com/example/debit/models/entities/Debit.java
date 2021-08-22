@@ -1,6 +1,7 @@
 package com.example.debit.models.entities;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 
@@ -28,7 +29,7 @@ public class Debit {
 	private String id;
 	
 	@Field(name = "associations")
-	private List<Acquisition> associations;
+	private List<Acquisition> associations = new ArrayList<>();
 
 	@Field(name = "principal")
 	private Acquisition principal;

@@ -6,6 +6,7 @@ import org.springframework.stereotype.Service;
 import com.example.debit.models.entities.Debit;
 import com.example.debit.repositories.IDebitRepository;
 import com.example.debit.repositories.IRepository;
+import reactor.core.publisher.Mono;
 
 @Service
 public class DebitService extends BaseService<Debit,String> implements IDebitService  {
@@ -21,5 +22,9 @@ public class DebitService extends BaseService<Debit,String> implements IDebitSer
 	protected IRepository<Debit, String> getRepository() {
 		return iDebitRepository;
 	}
-	
+
+	@Override
+	public Mono<Debit> findDebitByCardNumber(String cardNumber) {
+		return findDebitByCardNumber(cardNumber);
+	}
 }
