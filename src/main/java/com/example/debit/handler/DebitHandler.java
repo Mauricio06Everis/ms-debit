@@ -1,14 +1,16 @@
 package com.example.debit.handler;
 
 import java.net.URI;
-import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
+import com.example.debit.models.dto.DebitCreateDTO;
 import com.example.debit.models.entities.Acquisition;
 import com.example.debit.services.AcquisitionService;
 import com.example.debit.util.CreditCardNumberGenerator;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
@@ -28,6 +30,7 @@ public class DebitHandler {
 
 	private final IDebitService debitService;
 	private final AcquisitionService acquisitionService;
+
 	@Autowired
 	public DebitHandler(IDebitService debitService, AcquisitionService acquisitionService) {
 		this.debitService = debitService;
@@ -46,66 +49,89 @@ public class DebitHandler {
 								.bodyValue(p))
 						.switchIfEmpty(ServerResponse.notFound().build());
 	}
-	
 	public Mono<ServerResponse> save(ServerRequest request) {
-		log.info("DEBIT: " + request.toString());
-		Mono<Debit> product = request.bodyToMono(Debit.class);
-		return product.flatMap(debitService::create)
-					.flatMap(p -> ServerResponse.created(URI.create("/debit/".concat(p.getId())))
-							.contentType(MediaType.APPLICATION_JSON)
-							.bodyValue(p))
-					.onErrorResume(error -> {
-						log.error("Error: "+ error);
-						return Mono.error(error);
-					});
-						
-						
+		Mono<Debit> debitRequest = request.bodyToMono(Debit.class);
+		return debitRequest
+				.zipWhen(debit -> {
+					log.info("ACQUSITION, {}", acquisitionService.findByIban(debit.getPrincipal().getIban()));
+					return acquisitionService.findByIban(debit.getPrincipal().getIban());
+				})
+				.flatMap(result -> {
+					List<Acquisition> associations = result.getT1().getAssociations();
+					associations.add(result.getT2());
+					log.info("LIST, {}", associations);
+					result.getT1().setAssociations(associations);
+					result.getT1().setCardNumber(new CreditCardNumberGenerator().generate("4551", 17));
+					result.getT1().setPrincipal(result.getT2());
+					return debitService.create(result.getT1());
+				})
+				.switchIfEmpty(Mono.error(new RuntimeException("debit created failed")))
+				.checkpoint("after debit created")
+				.flatMap(debit -> ServerResponse.ok()
+						.contentType(MediaType.APPLICATION_JSON)
+						.bodyValue(debit))
+				.log()
+				.onErrorResume(error -> Mono.error(new RuntimeException(error.getMessage())));
 	}
 
-	public Mono<ServerResponse> associationAcquisitions(ServerRequest request){
+
+	public Mono<ServerResponse> associationAcquisitions(ServerRequest request) {
 		String cardNumber = request.pathVariable("cardNumber");
 		String iban = request.pathVariable("iban");
-		Mono<Debit> debit = debitService.findDebitByCardNumber(cardNumber);
+		Mono<Debit> debit = debitService.findByCardNumber(cardNumber);
 		Mono<Acquisition> acquisition = acquisitionService.findByIban(iban);
-		Mono<List<Acquisition>> debitList = debit.map(Debit::getAssociations);
-		Mono<Debit> debitMono = Mono.just(new Debit());
-		return Flux.zip(debitList, acquisition, debitMono).flatMapSequential(r -> {
-			long exist = r.getT1().stream().filter(acquisition1 -> Objects.equals(acquisition1.getIban(), iban)).count();
-			if (exist > 0){
-				return ServerResponse.ok()
+		return debit.zipWith(acquisition, (deb, acq) -> {
+			long existAcquisition = deb.getAssociations().stream().filter(d -> Objects.equals(d.getIban(), iban)).count();
+			if (existAcquisition > 0){
+				return Mono.error(new RuntimeException("the account you want to associate already exist"));
+			}
+			List<Acquisition> associations = deb.getAssociations();
+			associations.add(acq);
+			return debitService.update(deb);
+		})
+				.switchIfEmpty(Mono.error(new RuntimeException("debit association failed")))
+				.flatMap(Mono::checkpoint)
+				.flatMap(debitResponse -> ServerResponse.ok()
 						.contentType(MediaType.APPLICATION_JSON)
-						.bodyValue("the account you want to associate already exist");
-			}
-			r.getT1().add(r.getT2());
-			r.getT3().setAssociations(r.getT1());
-			if (r.getT3().getPrincipal() == null) {
-				r.getT3().setPrincipal(r.getT2());
-			}
-			return debitService.update(r.getT3());
-		}).collectList().flatMap(p -> ServerResponse.ok()
-				.contentType(MediaType.APPLICATION_JSON)
-				.bodyValue(p));
-	}
-
-	public Mono<ServerResponse> update(ServerRequest request) {
-		Mono<Debit> product = request.bodyToMono(Debit.class);
-		String id = request.pathVariable("id");
-		return product
-					.flatMap(p -> {
-						p.setId(id);
-						return debitService.update(p);
-					})
-					.flatMap(p -> ServerResponse.created(URI.create("api/product".concat(p.getId())))
-							.contentType(MediaType.APPLICATION_JSON)
-							.bodyValue(p)
-		);
-							
-					
+						.bodyValue(debitResponse))
+				.log()
+				.onErrorResume(error -> Mono.error(new RuntimeException(error.getMessage())));
 	}
 	
-	public Mono<ServerResponse> delete(ServerRequest request) {
-		String id = request.pathVariable("id");
-		return debitService.delete(id).then(ServerResponse.noContent().build());
+	public Mono<ServerResponse> disassociationAcquisitions(ServerRequest request) {
+		String cardNumber = request.pathVariable("cardNumber");
+		String iban = request.pathVariable("iban");
+		Mono<Debit> debit = debitService.findByCardNumber(cardNumber);
+		Mono<Acquisition> acquisition = acquisitionService.findByIban(iban);
+		return debit.zipWith(acquisition, (deb, acq) -> {
+					long existAcquisition = deb.getAssociations().stream().filter(d -> Objects.equals(d.getIban(), iban)).count();
+					List<Acquisition> associations = deb.getAssociations();
+					if (existAcquisition == 0){
+						return Mono.error(new RuntimeException("the account you want to disassociate does not exist"));
+					}
+					Double maxBalance= deb.getAssociations().stream()
+							.map(asc -> asc.getBill().getBalance())
+							.max(Comparator.comparing(i -> i))
+							.orElse(0.0);
+					Acquisition acquisitionMaxBalance = deb.getAssociations()
+							.stream()
+							.filter(acquisition1 -> Objects.equals(acquisition1.getBill().getBalance(), maxBalance))
+							.findFirst()
+							.orElse(new Acquisition());
+					if (deb.getAssociations().contains(acq)){
+						//deb.setPrincipal(associations.get(associations.size() - 1));
+						deb.setPrincipal(acquisitionMaxBalance);
+					}
+					associations.remove(acq);
+					return debitService.update(deb);
+				})
+				.switchIfEmpty(Mono.error(new RuntimeException("debit association failed")))
+				.flatMap(Mono::checkpoint)
+				.flatMap(debitResponse -> ServerResponse.ok()
+						.contentType(MediaType.APPLICATION_JSON)
+						.bodyValue(debitResponse))
+				.log()
+				.onErrorResume(error -> Mono.error(new RuntimeException(error.getMessage())));
 	}
 	
 	

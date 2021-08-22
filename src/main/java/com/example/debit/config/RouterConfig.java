@@ -17,6 +17,8 @@ public class RouterConfig {
 	public RouterFunction<ServerResponse> rutas(DebitHandler handler) {
 		return route(GET("/debit"), handler::findAll)
 				.andRoute(GET("/debit/{id}"), handler::findById)
+				.andRoute(GET("/debit/association/{cardNumber}/{iban}"), handler::associationAcquisitions)
+				.andRoute(GET("/debit/disassociation/{cardNumber}/{iban}"), handler::disassociationAcquisitions)
 				.andRoute(POST("/debit"), handler::save);
 				
 	}

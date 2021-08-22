@@ -24,7 +24,7 @@ public class DebitService extends BaseService<Debit,String> implements IDebitSer
 	}
 
 	@Override
-	public Mono<Debit> findDebitByCardNumber(String cardNumber) {
-		return findDebitByCardNumber(cardNumber);
+	public Mono<Debit> findByCardNumber(String cardNumber) {
+		return iDebitRepository.findByCardNumber(cardNumber);
 	}
 }

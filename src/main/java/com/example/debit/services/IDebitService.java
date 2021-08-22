@@ -4,5 +4,5 @@ import com.example.debit.models.entities.Debit;
 import reactor.core.publisher.Mono;
 
 public interface IDebitService extends IBaseService<Debit,String> {
-    Mono<Debit> findDebitByCardNumber(String cardNumber);
+    Mono<Debit> findByCardNumber(String cardNumber);
 }
