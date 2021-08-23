@@ -113,13 +113,13 @@ public class DebitHandler {
 		Mono<Acquisition> acquisition = acquisitionService.findByIban(iban);
 		return debit.zipWith(acquisition, (deb, acq) -> {
 					long existAcquisition = deb.getAssociations().stream().filter(d -> Objects.equals(d.getIban(), iban)).count();
-					Boolean isPrincipal = deb.getPrincipal().equals(acq);
+					Boolean isPrincipal = deb.getPrincipal().getIban().equals(acq.getIban());
 					List<Acquisition> associations = deb.getAssociations();
-					associations.remove(acq);
 					if (existAcquisition == 0){
 						return Mono.error(new RuntimeException("the account you want to disassociate does not exist"));
 					}
-					if (isPrincipal){
+					associations.remove(acq);
+					if (Boolean.TRUE.equals(isPrincipal)){
 						Double maxBalance= associations.stream()
 								.map(asc -> asc.getBill().getBalance())
 								.max(Comparator.comparing(i -> i))
@@ -136,7 +136,7 @@ public class DebitHandler {
 					deb.setAssociations(associations);
 					return debitService.update(deb);
 				})
-				.switchIfEmpty(Mono.error(new RuntimeException("debit association failed")))
+				.switchIfEmpty(Mono.error(new RuntimeException("debit set main account failed")))
 				.flatMap(Mono::checkpoint)
 				.flatMap(debitResponse -> ServerResponse.ok()
 						.contentType(MediaType.APPLICATION_JSON)
@@ -144,6 +144,43 @@ public class DebitHandler {
 				.log()
 				.onErrorResume(error -> Mono.error(new RuntimeException(error.getMessage())));
 	}
-	
-	
+
+	public Mono<ServerResponse> defineAccountAsMain(ServerRequest request) {
+		String iban = request.pathVariable("iban");
+		String cardNumber = request.pathVariable("cardNumber");
+		Mono<Debit> debit = debitService.findByCardNumber(cardNumber);
+		Mono<Acquisition> acquisition = acquisitionService.findByIban(iban);
+		return debit.zipWith(acquisition, (deb, acq) -> {
+			long existAcquisition = deb.getAssociations().stream().filter(d -> Objects.equals(d.getIban(), iban)).count();
+			Boolean isPrincipal = deb.getPrincipal().getIban().equals(acq.getIban());
+			if (existAcquisition == 0){
+				return Mono.error(new RuntimeException("the account you want to disassociate does not exist"));
+			}
+			if (Boolean.TRUE.equals(isPrincipal)){
+				return Mono.error(new RuntimeException("this account is already the main one"));
+			}
+			deb.setPrincipal(acq);
+			return debitService.update(deb);
+		})
+				.flatMap(debitResponse -> ServerResponse.ok()
+				.contentType(MediaType.APPLICATION_JSON)
+				.bodyValue(debitResponse))
+				.log()
+				.onErrorResume(error -> Mono.error(new RuntimeException(error.getMessage())));
+	}
+	public Mono<ServerResponse> update(ServerRequest request) {
+		Mono<Debit> debitRequest = request.bodyToMono(Debit.class);
+		return debitRequest
+				.zipWhen(debit -> debitService.findByCardNumber(debit.getCardNumber()))
+				.flatMap(data -> {
+					data.getT2().setAssociations(data.getT1().getAssociations());
+					data.getT2().setPrincipal(data.getT1().getPrincipal());
+					return debitService.update(data.getT2());
+				})
+				.flatMap(debitResponse -> ServerResponse.ok()
+						.contentType(MediaType.APPLICATION_JSON)
+						.bodyValue(debitResponse))
+				.log()
+				.onErrorResume(error -> Mono.error(new RuntimeException(error.getMessage())));
+	}
 }
