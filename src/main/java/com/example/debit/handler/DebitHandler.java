@@ -47,7 +47,14 @@ public class DebitHandler {
 		return debitService.findById(id).flatMap(p -> ServerResponse.ok()
 								.contentType(MediaType.APPLICATION_JSON)
 								.bodyValue(p))
-						.switchIfEmpty(ServerResponse.notFound().build());
+						.switchIfEmpty(Mono.error(new RuntimeException("Debit card not found")));
+	}
+	public Mono<ServerResponse> findByCardNumber(ServerRequest request) {
+		String cardNumber = request.pathVariable("cardNumber");
+		return debitService.findByCardNumber(cardNumber).flatMap(p -> ServerResponse.ok()
+						.contentType(MediaType.APPLICATION_JSON)
+						.bodyValue(p))
+				.switchIfEmpty(Mono.error(new RuntimeException("Debit card not found")));
 	}
 	public Mono<ServerResponse> save(ServerRequest request) {
 		Mono<Debit> debitRequest = request.bodyToMono(Debit.class);
