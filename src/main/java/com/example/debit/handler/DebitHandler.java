@@ -81,8 +81,42 @@ public class DebitHandler {
 				.onErrorResume(error -> Mono.error(new RuntimeException(error.getMessage())));
 	}
 
-
 	public Mono<ServerResponse> associationAcquisitions(ServerRequest request) {
+		String cardNumber = request.pathVariable("cardNumber");
+		String iban = request.pathVariable("iban");
+		Mono<Debit> debit = debitService.findByCardNumber(cardNumber);
+		Mono<Acquisition> acquisition = acquisitionService.findByIban(iban);
+		Mono<Acquisition> acquisitionUpdateCard = Mono.just(new Acquisition());
+		return Mono.zip(debit, acquisition, acquisitionUpdateCard)
+				.zipWhen(data -> {
+					long existAcquisition = data.getT1().getAssociations().stream().filter(d -> Objects.equals(d.getIban(), iban)).count();
+					if (existAcquisition > 0){
+						return Mono.error(new RuntimeException("the account you want to associate already exist"));
+					}
+					List<Acquisition> associations =  data.getT1().getAssociations();
+					associations.add(data.getT2());
+					data.getT1().setAssociations(associations);
+					return debitService.update(data.getT1());
+				})
+				.flatMap(result -> {
+					List<Acquisition> associations = result.getT2().getAssociations();
+					Acquisition currentAcq = associations
+							.stream()
+							.filter(acquisition1 -> Objects.equals(acquisition1.getIban(), result.getT1().getT2().getIban()))
+							.findFirst()
+							.orElseThrow(() -> new RuntimeException("Acquisition with iban does not exist"));
+					currentAcq.setCardNumber(result.getT2().getCardNumber());
+					return acquisitionService.updateAcquisition(currentAcq);
+				})
+				.switchIfEmpty(Mono.error(new RuntimeException("debit association failed")))
+				.flatMap(debitResponse -> ServerResponse.ok()
+						.contentType(MediaType.APPLICATION_JSON)
+						.bodyValue(debitResponse))
+				.log()
+				.onErrorResume(error -> Mono.error(new RuntimeException(error.getMessage())));
+	}
+
+	/*public Mono<ServerResponse> associationAcquisitions(ServerRequest request) {
 		String cardNumber = request.pathVariable("cardNumber");
 		String iban = request.pathVariable("iban");
 		Mono<Debit> debit = debitService.findByCardNumber(cardNumber);
@@ -104,7 +138,7 @@ public class DebitHandler {
 						.bodyValue(debitResponse))
 				.log()
 				.onErrorResume(error -> Mono.error(new RuntimeException(error.getMessage())));
-	}
+	}*/
 	
 	public Mono<ServerResponse> disassociationAcquisitions(ServerRequest request) {
 		String cardNumber = request.pathVariable("cardNumber");
@@ -130,7 +164,6 @@ public class DebitHandler {
 								.filter(acquisition1 -> Objects.equals(acquisition1.getBill().getBalance(), maxBalance))
 								.findFirst()
 								.orElse(new Acquisition());
-						//deb.setPrincipal(associations.get(associations.size() - 1));
 						deb.setPrincipal(acquisitionMaxBalance);
 					}
 					deb.setAssociations(associations);
