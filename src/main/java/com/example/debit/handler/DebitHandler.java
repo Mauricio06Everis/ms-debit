@@ -56,6 +56,23 @@ public class DebitHandler {
 						.bodyValue(p))
 				.switchIfEmpty(Mono.error(new RuntimeException("Debit card not found")));
 	}
+	public Mono<ServerResponse> findByAccountNumber(ServerRequest request) {
+		String accountNumber = request.pathVariable("accountNumber");
+		return debitService.findAll().collectList().flatMap(debits -> {
+			Acquisition acquisition = debits.stream()
+					.map(Debit::getAssociations)
+					.collect(Collectors.toList())
+					.stream()
+					.flatMap(d -> d.stream()
+							.filter(r -> Objects.equals(r.getBill().getAccountNumber(), accountNumber)))
+					.findFirst()
+					.orElseThrow(() -> new RuntimeException("Account number does no associate exits in debit card"));
+			return Mono.just(acquisition);
+		}).flatMap(debit -> ServerResponse.ok()
+				.contentType(MediaType.APPLICATION_JSON)
+				.bodyValue(debit))
+				.onErrorResume(error -> Mono.error(new RuntimeException(error.getMessage())));
+	}
 	public Mono<ServerResponse> save(ServerRequest request) {
 		Mono<Debit> debitRequest = request.bodyToMono(Debit.class);
 		return debitRequest
