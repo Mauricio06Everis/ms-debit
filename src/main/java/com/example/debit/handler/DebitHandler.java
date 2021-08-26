@@ -59,15 +59,15 @@ public class DebitHandler {
 	public Mono<ServerResponse> findByAccountNumber(ServerRequest request) {
 		String accountNumber = request.pathVariable("accountNumber");
 		return debitService.findAll().collectList().flatMap(debits -> {
-			Acquisition acquisition = debits.stream()
+			List<Acquisition> acquisitions = debits.stream()
 					.map(Debit::getAssociations)
 					.collect(Collectors.toList())
 					.stream()
 					.flatMap(d -> d.stream()
 							.filter(r -> Objects.equals(r.getBill().getAccountNumber(), accountNumber)))
-					.findFirst()
-					.orElseThrow(() -> new RuntimeException("Account number does no associate exits in debit card"));
-			return Mono.just(acquisition);
+					.collect(Collectors.toList());
+			log.info("ACQ_LIST, {}", acquisitions);
+			return debitService.findByAssociations(acquisitions);
 		}).flatMap(debit -> ServerResponse.ok()
 				.contentType(MediaType.APPLICATION_JSON)
 				.bodyValue(debit))
