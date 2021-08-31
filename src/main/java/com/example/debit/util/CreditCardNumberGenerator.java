@@ -7,7 +7,7 @@ import java.util.Random;
  * Author Orlando Kuan Becerra
  */
 public class CreditCardNumberGenerator {
-    private Random random = new Random(System.currentTimeMillis());
+    private final Random random = new Random(System.currentTimeMillis());
 
     /**
      * @param bin
