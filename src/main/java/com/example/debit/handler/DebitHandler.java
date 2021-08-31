@@ -73,6 +73,7 @@ public class DebitHandler {
 				.bodyValue(debit))
 				.onErrorResume(error -> Mono.error(new RuntimeException(error.getMessage())));
 	}
+
 	public Mono<ServerResponse> save(ServerRequest request) {
 		Mono<Debit> debitRequest = request.bodyToMono(Debit.class);
 		return debitRequest
