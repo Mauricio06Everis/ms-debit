@@ -7,6 +7,7 @@ import java.util.Objects;
 import java.util.stream.Collectors;
 
 import com.example.debit.models.dto.DebitCreateDTO;
+import com.example.debit.models.dto.payload.RequestAssociateDTO;
 import com.example.debit.models.entities.Acquisition;
 import com.example.debit.services.AcquisitionService;
 import com.example.debit.util.CreditCardNumberGenerator;
@@ -97,6 +98,35 @@ public class DebitHandler {
 						.bodyValue(debit))
 				.log()
 				.onErrorResume(error -> Mono.error(new RuntimeException(error.getMessage())));
+	}
+	public Mono<Acquisition> associationAcquisitionsWithDebit(Mono<RequestAssociateDTO> debitRequest) {
+		return debitRequest
+				.zipWhen(debRequest -> {
+					Mono<Debit> debit = debitService.findByCardNumber(debRequest.getCardNumber());
+					Mono<Acquisition> acquisition = acquisitionService.findByIban(debRequest.getIban());
+					Mono<Acquisition> acquisitionUpdateCard = Mono.just(new Acquisition());
+					return Mono.zip(debit, acquisition, acquisitionUpdateCard);
+				})
+				.zipWhen(data -> {
+					long existAcquisition = data.getT2().getT1().getAssociations().stream().filter(d -> Objects.equals(d.getIban(), data.getT1().getIban())).count();
+					if (existAcquisition > 0){
+						return Mono.error(new RuntimeException("the account you want to associate already exist"));
+					}
+					List<Acquisition> associations =  data.getT2().getT1().getAssociations();
+					associations.add(data.getT2().getT2());
+					data.getT2().getT1().setAssociations(associations);
+					return debitService.update(data.getT2().getT1());
+				})
+				.flatMap(result -> {
+					List<Acquisition> associations = result.getT2().getAssociations();
+					Acquisition currentAcq = associations
+							.stream()
+							.filter(acquisition1 -> Objects.equals(acquisition1.getIban(), result.getT1().getT2().getT2().getIban()))
+							.findFirst()
+							.orElseThrow(() -> new RuntimeException("Acquisition with iban does not exist"));
+					currentAcq.setCardNumber(result.getT2().getCardNumber());
+					return acquisitionService.updateAcquisition(currentAcq);
+				});
 	}
 
 	public Mono<ServerResponse> associationAcquisitions(ServerRequest request) {
