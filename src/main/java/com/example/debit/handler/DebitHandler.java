@@ -9,6 +9,7 @@ import java.util.stream.Collectors;
 import com.example.debit.models.dto.DebitCreateDTO;
 import com.example.debit.models.dto.payload.RequestAssociateDTO;
 import com.example.debit.models.entities.Acquisition;
+import com.example.debit.models.entities.Customer;
 import com.example.debit.services.AcquisitionService;
 import com.example.debit.util.CreditCardNumberGenerator;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -72,6 +73,24 @@ public class DebitHandler {
 		}).flatMap(debit -> ServerResponse.ok()
 				.contentType(MediaType.APPLICATION_JSON)
 				.bodyValue(debit))
+				.onErrorResume(error -> Mono.error(new RuntimeException(error.getMessage())));
+	}
+
+	public Mono<ServerResponse> findByIdentityNumber(ServerRequest request) {
+		String identityNumber = request.pathVariable("identityNumber");
+		return debitService.findAll().collectList().flatMap(debits -> {
+					List<Acquisition> acquisitions = debits.stream()
+							.map(Debit::getAssociations)
+							.collect(Collectors.toList())
+							.stream()
+							.flatMap(d -> d.stream()
+									.filter(r -> Objects.equals(r.getCustomerHolder().stream().findFirst().orElse(new Customer()).getCustomerIdentityNumber(), identityNumber)))
+							.collect(Collectors.toList());
+					log.info("ACQ_LIST, {}", acquisitions);
+					return debitService.findByAssociations(acquisitions);
+				}).flatMap(debit -> ServerResponse.ok()
+						.contentType(MediaType.APPLICATION_JSON)
+						.bodyValue(debit))
 				.onErrorResume(error -> Mono.error(new RuntimeException(error.getMessage())));
 	}
 
@@ -164,43 +183,22 @@ public class DebitHandler {
 				.onErrorResume(error -> Mono.error(new RuntimeException(error.getMessage())));
 	}
 
-	/*public Mono<ServerResponse> associationAcquisitions(ServerRequest request) {
-		String cardNumber = request.pathVariable("cardNumber");
-		String iban = request.pathVariable("iban");
-		Mono<Debit> debit = debitService.findByCardNumber(cardNumber);
-		Mono<Acquisition> acquisition = acquisitionService.findByIban(iban);
-		return debit.zipWith(acquisition, (deb, acq) -> {
-			long existAcquisition = deb.getAssociations().stream().filter(d -> Objects.equals(d.getIban(), iban)).count();
-			if (existAcquisition > 0){
-				return Mono.error(new RuntimeException("the account you want to associate already exist"));
-			}
-			List<Acquisition> associations = deb.getAssociations();
-			associations.add(acq);
-			deb.setAssociations(associations);
-			return debitService.update(deb);
-		})
-				.switchIfEmpty(Mono.error(new RuntimeException("debit association failed")))
-				.flatMap(Mono::checkpoint)
-				.flatMap(debitResponse -> ServerResponse.ok()
-						.contentType(MediaType.APPLICATION_JSON)
-						.bodyValue(debitResponse))
-				.log()
-				.onErrorResume(error -> Mono.error(new RuntimeException(error.getMessage())));
-	}*/
-	
 	public Mono<ServerResponse> disassociationAcquisitions(ServerRequest request) {
 		String cardNumber = request.pathVariable("cardNumber");
 		String iban = request.pathVariable("iban");
 		Mono<Debit> debit = debitService.findByCardNumber(cardNumber);
 		Mono<Acquisition> acquisition = acquisitionService.findByIban(iban);
-		return debit.zipWith(acquisition, (deb, acq) -> {
-					long existAcquisition = deb.getAssociations().stream().filter(d -> Objects.equals(d.getIban(), iban)).count();
-					Boolean isPrincipal = deb.getPrincipal().getIban().equals(acq.getIban());
-					List<Acquisition> associations = deb.getAssociations();
+		Mono<Acquisition> acquisitionUpdateCard = Mono.just(new Acquisition());
+
+		return Mono.zip(debit, acquisition, acquisitionUpdateCard)
+				.zipWhen(data -> {
+					Boolean isPrincipal = data.getT1().getPrincipal().getIban().equals(data.getT2().getIban());
+					long existAcquisition = data.getT1().getAssociations().stream().filter(d -> Objects.equals(d.getIban(), iban)).count();
 					if (existAcquisition == 0){
 						return Mono.error(new RuntimeException("the account you want to disassociate does not exist"));
 					}
-					associations.remove(acq);
+					List<Acquisition> associations =  data.getT1().getAssociations();
+					associations.remove(data.getT2());
 					if (Boolean.TRUE.equals(isPrincipal)){
 						Double maxBalance= associations.stream()
 								.map(asc -> asc.getBill().getBalance())
@@ -212,13 +210,17 @@ public class DebitHandler {
 								.filter(acquisition1 -> Objects.equals(acquisition1.getBill().getBalance(), maxBalance))
 								.findFirst()
 								.orElse(new Acquisition());
-						deb.setPrincipal(acquisitionMaxBalance);
+						data.getT1().setPrincipal(acquisitionMaxBalance);
 					}
-					deb.setAssociations(associations);
-					return debitService.update(deb);
+					data.getT1().setAssociations(associations);
+					return debitService.update(data.getT1());
 				})
-				.switchIfEmpty(Mono.error(new RuntimeException("debit set main account failed")))
-				.flatMap(Mono::checkpoint)
+				.flatMap(result -> {
+					Acquisition currentAcq = result.getT1().getT2();
+					currentAcq.setCardNumber("");
+					return acquisitionService.updateAcquisition(currentAcq);
+				})
+				.switchIfEmpty(Mono.error(new RuntimeException("debit association failed")))
 				.flatMap(debitResponse -> ServerResponse.ok()
 						.contentType(MediaType.APPLICATION_JSON)
 						.bodyValue(debitResponse))

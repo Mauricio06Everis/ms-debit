@@ -19,6 +19,7 @@ public class RouterConfig {
 				.andRoute(GET("/debit/{id}"), handler::findById)
 				.andRoute(GET("/debit/card/{cardNumber}"), handler::findByCardNumber)
 				.andRoute(GET("/debit/account/{accountNumber}"), handler::findByAccountNumber)
+				.andRoute(GET("/debit/identity/{identityNumber}"), handler::findByIdentityNumber)
 				.andRoute(GET("/debit/association/{cardNumber}/{iban}"), handler::associationAcquisitions)
 				.andRoute(GET("/debit/disassociation/{cardNumber}/{iban}"), handler::disassociationAcquisitions)
 				.andRoute(GET("/debit/main/{cardNumber}/{iban}"), handler::defineAccountAsMain)
